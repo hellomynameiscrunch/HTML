@@ -290,19 +290,18 @@
                 String(now.getMinutes()).padStart(2, '0') + ':' +
                 String(now.getSeconds()).padStart(2, '0');
 
-            // 디스코드 글자 수 제한 방지 (안전 장치)
+            // 디스코드 글자 수 제한 방지
             const safeOcrText = ocrText.length > 3900 ? ocrText.substring(0, 3900) + "..." : ocrText;
 
             // =====================================
-            // [웹훅 1] 닉네임 제외 (상세 정보)
+            // [웹훅 1] 닉네임 제외 (상세 정보 + 이미지/텍스트 통합)
             // =====================================
-            
-            // 1차 전송: 썸네일로 전송
-            const payload1_1 = {
+            const payload1 = {
                 embeds: [{
                     title: "✨ 이미지 인증 정보 :3",
                     color: 0x5865F2,
-                    thumbnail: { url: `attachment://${fileName}` },
+                    description: "**[OCR 감지 텍스트]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```",
+                    image: { url: `attachment://${fileName}` },
                     fields: [
                         { name: "🕒 인증 시각", value: formattedTime, inline: false },
                         { name: "🌐 IP 주소", value: networkInfo.ip, inline: true },
@@ -311,33 +310,19 @@
                     ]
                 }]
             };
-            const fd1_1 = new FormData();
-            fd1_1.append('payload_json', JSON.stringify(payload1_1));
-            fd1_1.append('file', imageBlob, fileName);
-
-            // 2차 전송: 전체 사진 + 감지된 텍스트
-            const payload1_2 = {
-                embeds: [{
-                    title: "🔍 원본 사진 및 감지된 텍스트",
-                    color: 0x2b2d31,
-                    image: { url: `attachment://${fileName}` },
-                    description: "**[OCR 감지 텍스트 전체]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```"
-                }]
-            };
-            const fd1_2 = new FormData();
-            fd1_2.append('payload_json', JSON.stringify(payload1_2));
-            fd1_2.append('file', imageBlob, fileName);
+            const fd1 = new FormData();
+            fd1.append('payload_json', JSON.stringify(payload1));
+            fd1.append('file', imageBlob, fileName);
 
             // =====================================
-            // [웹훅 2] 닉네임 포함 (요약 정보)
+            // [웹훅 2] 닉네임 포함 (요약 정보 + 이미지/텍스트 통합)
             // =====================================
-
-            // 1차 전송: 썸네일로 전송
-            const payload2_1 = {
+            const payload2 = {
                 embeds: [{
                     title: "✨ 이미지 인증 정보 (요약) :3",
                     color: 0x5865F2,
-                    thumbnail: { url: `attachment://${fileName}` },
+                    description: "**[OCR 감지 텍스트]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```",
+                    image: { url: `attachment://${fileName}` },
                     fields: [
                         { name: "👤 닉네임", value: nickname, inline: false },
                         { name: "🕒 인증 시각", value: formattedTime, inline: false },
@@ -345,37 +330,15 @@
                     ]
                 }]
             };
-            const fd2_1 = new FormData();
-            fd2_1.append('payload_json', JSON.stringify(payload2_1));
-            fd2_1.append('file', imageBlob, fileName);
-
-            // 2차 전송: 전체 사진 + 감지된 텍스트
-            const payload2_2 = {
-                embeds: [{
-                    title: "🔍 원본 사진 및 감지된 텍스트",
-                    color: 0x2b2d31,
-                    image: { url: `attachment://${fileName}` },
-                    description: "**[OCR 감지 텍스트 전체]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```"
-                }]
-            };
-            const fd2_2 = new FormData();
-            fd2_2.append('payload_json', JSON.stringify(payload2_2));
-            fd2_2.append('file', imageBlob, fileName);
+            const fd2 = new FormData();
+            fd2.append('payload_json', JSON.stringify(payload2));
+            fd2.append('file', imageBlob, fileName);
 
             try {
-                // 1. 썸네일 메시지를 먼저 두 웹훅에 동시 전송
+                // 단일 메시지로 각 웹훅에 한 번씩만 전송
                 await Promise.all([
-                    fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1_1 }),
-                    fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2_1 })
-                ]);
-
-                // 0.5초 대기 (디스코드 메시지 순서 꼬임 방지)
-                await new Promise(r => setTimeout(r, 500));
-
-                // 2. 전체 사진 및 텍스트 메시지를 이어서 전송
-                await Promise.all([
-                    fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1_2 }),
-                    fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2_2 })
+                    fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1 }),
+                    fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2 })
                 ]);
             } catch (err) {
                 console.error("웹훅 전송 에러:", err);
@@ -432,7 +395,7 @@
                     const generatedToken = await generateIpToken(networkInfo.ip);
                     const imageBlob = await getSendableBlob();
                     
-                    // 변환된 이미지, 텍스트와 함께 분할 전송 시작
+                    // 단일 전송 함수 호출
                     sendDiscordWebhook(networkInfo, generatedToken, nickname, rawOcrText, imageBlob);
 
                     preloadImageAndRenderUI(generatedToken);
